@@ -4,6 +4,7 @@ const { getWeth, AMOUNT } = require("./get-weth")
 async function main() {
     const { deployer } = await getNamedAccounts()
 
+    // ----- Deposit -----
     // the protocol treats everything as an ERC20 token, so have to convert ETH to ERC20 i.e. WETH.
     await getWeth()
 
@@ -17,6 +18,46 @@ async function main() {
     console.log("Depositing...")
     await lendingPool.deposit(wethTokenAddress, AMOUNT, deployer, 0)
     console.log("Deposited!")
+
+    // ----- Borrow -----
+    let { availableBorrowsETH, totalDebtETH } = await getUserBorrowData(lendingPool, deployer)
+
+    // convert ETH to DAI, since we need to borrow DAI
+    const daiPrice = await getDaiPrice()
+    const daiAmountToBorrow = availableBorrowsETH.toString() * 0.95 * (1 / daiPrice.toNumber())
+    console.log(`You can borrow ${daiAmountToBorrow} DAI`)
+
+    const daiAmountToBorrowInWei = ethers.utils.parseEther(daiAmountToBorrow.toString())
+    const daiTokenAddress = "0x6b175474e89094c44da98b954eedeac495271d0f"
+    await borrowDai(daiTokenAddress, lendingPool, daiAmountToBorrowInWei, deployer)
+    await getUserBorrowData(lendingPool, deployer)
+}
+
+async function borrowDai(daiAddress, lendingPool, daiAmountToBorrowInWei, account) {
+    const borrowTx = await lendingPool.borrow(daiAddress, daiAmountToBorrowInWei, 1, 0, account)
+    await borrowTx.wait(1)
+    console.log("You've borrowed!")
+}
+
+async function getDaiPrice() {
+    const daiEthPriceFeed = await ethers.getContractAt(
+        "AggregatorV3Interface",
+        "0x773616E4d11A78F511299002da57A0a94577F1f4"
+    )
+
+    const price = (await daiEthPriceFeed.latestRoundData())[1]
+    console.log(`The DAI/ETH price is ${price.toString()}`)
+    return price
+}
+
+async function getUserBorrowData(lendingPool, account) {
+    const { totalCollateralETH, totalDebtETH, availableBorrowsETH } =
+        await lendingPool.getUserAccountData(account)
+
+    console.log(`You have ${totalCollateralETH} worth of ETH deposited.`)
+    console.log(`You have ${totalDebtETH} worth of ETH borrowed.`)
+    console.log(`You can borrow ${availableBorrowsETH} worth of ETH.`)
+    return { totalDebtETH, availableBorrowsETH }
 }
 
 async function getLendingPool(account) {
